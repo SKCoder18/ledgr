@@ -1,4 +1,4 @@
-import { useState, FormEvent, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -23,7 +23,7 @@ export default function Auth() {
     if (!loading && user) navigate("/", { replace: true });
   }, [user, loading, navigate]);
 
-  const handle = async (e: FormEvent) => {
+  const handle = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     try {
