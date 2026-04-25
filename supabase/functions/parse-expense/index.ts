@@ -1,40 +1,49 @@
-// Edge function: parse expense from text, image, or SMS using Lovable AI
+// Edge function: parse expense from text, image, or SMS
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SYSTEM_PROMPT = `You extract expense data from user input. The input may be:
-- Free text like "coffee 4.50 yesterday" or "lunch with Sara $32"
-- A bank/payment SMS like "Rs.250 debited from a/c at SWIGGY on 10-Mar"
-- A receipt image (you'll see it as image content)
+const SYSTEM_PROMPT = `You extract financial transaction data from user input. Input may be:
+- Free text: "coffee 4.50 yesterday" or "got salary 50000 today"
+- Bank/payment SMS: "Rs.250 debited at SWIGGY" or "Rs.5000 credited from REFUND"
+- Receipt image
 
-Return ONE expense via the function call. Rules:
-- amount: numeric value only (no currency symbol)
-- currency: ISO code (USD, EUR, INR, GBP...). Infer from context (₹/Rs→INR, $→USD, €→EUR, £→GBP). Default USD.
-- category: one of [Food & Dining, Groceries, Transport, Shopping, Entertainment, Bills & Utilities, Health, Travel, Subscriptions, Education, Other]
-- merchant: business name if detected, else null
-- expense_date: ISO date (YYYY-MM-DD). "yesterday"/"today" relative to ${new Date().toISOString().slice(0,10)}. Default today.
-- notes: short context (max 80 chars), or null
-- confidence: 0.0–1.0 — your confidence in extraction`;
+CRITICAL: Determine transaction_type:
+- "income" → money received: keywords like credited, received, salary, refund, cashback, deposited, income, reward, bonus, payment received
+- "expense" → money spent: keywords like debited, paid, purchased, spent, withdrawn, charged
+- "transfer" → unclear, moving money between own accounts
+
+Return ONE transaction via function call. Rules:
+- amount: numeric value only (no currency symbol), always positive
+- currency: ISO code (INR for ₹/Rs, USD for $, EUR for €, GBP for £). Default USD.
+- transaction_type: "expense" | "income" | "transfer"
+- category: 
+  - If expense: one of [Food & Dining, Groceries, Transport, Shopping, Entertainment, Bills & Utilities, Health, Travel, Subscriptions, Education, Other]
+  - If income: one of [Salary, Freelance, Refund, Investment, Gift, Other Income]
+- merchant: business/sender name if detected, else null
+- expense_date: ISO date YYYY-MM-DD. "yesterday"/"today" relative to ${new Date().toISOString().slice(0, 10)}. Default today.
+- notes: short context max 80 chars, or null
+- confidence: 0.0–1.0`;
 
 const tool = {
   type: "function",
   function: {
-    name: "extract_expense",
-    description: "Extract a single expense from the input",
+    name: "extract_transaction",
+    description: "Extract a single financial transaction from the input",
     parameters: {
       type: "object",
       properties: {
         amount: { type: "number" },
         currency: { type: "string" },
+        transaction_type: { type: "string", enum: ["expense", "income", "transfer"] },
         category: { type: "string" },
         merchant: { type: ["string", "null"] },
         expense_date: { type: "string", description: "YYYY-MM-DD" },
         notes: { type: ["string", "null"] },
         confidence: { type: "number" },
       },
-      required: ["amount", "currency", "category", "expense_date", "confidence"],
+      required: ["amount", "currency", "transaction_type", "category", "expense_date", "confidence"],
       additionalProperties: false,
     },
   },
@@ -57,16 +66,13 @@ Deno.serve(async (req) => {
     const userContent: any[] = [];
     if (input) userContent.push({ type: "text", text: `Mode: ${mode || "text"}\nInput: ${input}` });
     if (image_base64) {
-      userContent.push({ type: "text", text: "Extract the expense from this receipt image:" });
+      userContent.push({ type: "text", text: "Extract the transaction from this receipt image:" });
       userContent.push({ type: "image_url", image_url: { url: image_base64 } });
     }
 
     const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
@@ -74,13 +80,13 @@ Deno.serve(async (req) => {
           { role: "user", content: userContent },
         ],
         tools: [tool],
-        tool_choice: { type: "function", function: { name: "extract_expense" } },
+        tool_choice: { type: "function", function: { name: "extract_transaction" } },
       }),
     });
 
     if (!resp.ok) {
       if (resp.status === 429) return new Response(JSON.stringify({ error: "Rate limit. Try again shortly." }), { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      if (resp.status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted. Add credits in workspace." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (resp.status === 402) return new Response(JSON.stringify({ error: "AI credits exhausted." }), { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       const t = await resp.text();
       console.error("AI gateway error:", resp.status, t);
       return new Response(JSON.stringify({ error: "AI gateway error" }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -89,7 +95,7 @@ Deno.serve(async (req) => {
     const data = await resp.json();
     const call = data.choices?.[0]?.message?.tool_calls?.[0];
     if (!call?.function?.arguments) {
-      return new Response(JSON.stringify({ error: "Could not extract expense" }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Could not extract transaction" }), { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const expense = JSON.parse(call.function.arguments);
     return new Response(JSON.stringify({ expense }), {
