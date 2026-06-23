@@ -1,0 +1,25 @@
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    # Runs every 5 days at 9:00 AM UTC to prevent Supabase free tier from pausing
+    - cron: '0 9 */5 * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase to keep project alive
+        run: |
+          echo "Pinging Supabase project to prevent auto-pause..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://wxpmhrdgsyrpuepuwikj.supabase.co/rest/v1/" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+          echo "Response status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 400 ]; then
+            echo "✅ Supabase project is alive!"
+          else
+            echo "⚠️ Unexpected status code: $HTTP_STATUS"
+          fi
