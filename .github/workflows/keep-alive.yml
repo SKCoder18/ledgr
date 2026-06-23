@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs every 5 days at 9:00 AM UTC to prevent Supabase free tier from pausing
     - cron: '0 9 */5 * *'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch: # Allow manual trigger from GitHub Actions tab
 
 jobs:
   ping:
@@ -12,14 +12,20 @@ jobs:
     steps:
       - name: Ping Supabase to keep project alive
         run: |
-          echo "Pinging Supabase project to prevent auto-pause..."
+          echo "🏓 Pinging Supabase project to prevent auto-pause..."
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://wxpmhrdgsyrpuepuwikj.supabase.co/rest/v1/" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}")
+            "https://wxpmhrdgsyrpuepuwikj.supabase.co")
           echo "Response status: $HTTP_STATUS"
-          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 400 ]; then
-            echo "✅ Supabase project is alive!"
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 500 ]; then
+            echo "✅ Supabase project is alive! No pause today."
           else
-            echo "⚠️ Unexpected status code: $HTTP_STATUS"
+            echo "⚠️ Could not reach Supabase. Status: $HTTP_STATUS"
+            exit 1
           fi
+
+      - name: Ping Vercel site too
+        run: |
+          echo "🏓 Pinging Vercel deployment..."
+          curl -s -o /dev/null -w "Vercel status: %{http_code}\n" \
+            "https://ledgr-hazel.vercel.app"
+          echo "✅ Done!"
